@@ -1,4 +1,7 @@
 import warnings
+import traceback
+import sys
+
 from asl_data import SinglesData
 
 
@@ -21,5 +24,36 @@ def recognize(models: dict, test_set: SinglesData):
     probabilities = []
     guesses = []
     # TODO implement the recognizer
-    # return probabilities, guesses
+
+    for test_item in range(test_set.num_items):
+        #print("test item is : {}".format(test_item))
+        probabilities[test_item]=dict()
+        for model_word in models:
+            X,lengths=test_set.get_item_Xlengths(test_item)
+            try:
+                logL = models[model_word].score(X,lengths)
+            except:
+                print
+                "Exception in user code:"
+                print
+                '-' * 60
+                traceback.print_exc(file=sys.stdout)
+                print
+                '-' * 60
+                logL=float('-inf')
+            probabilities[test_item][model_word]=logL
+
+        max_logL=None
+        for word in probabilities[test_item]:
+            if max_logL is None:
+                max_logL=probabilities[test_item][word]
+                guess=word
+            if probabilities[test_item][word] > max_logL:
+                max_logL=probabilities[test_item][word]
+                guess=word
+        guesses[test_item]=guess
+
+
+    return probabilities, guesses
+
     raise NotImplementedError

@@ -78,6 +78,47 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
+        best_bic=None
+        best_model=None
+
+        # N is the number of data points
+        N = len(self.X)
+
+        for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
+            try:
+                # todo : Would be a good idea to score the model with a part of the data it is
+                # not trained with
+                model = GaussianHMM(n_components=num_hidden_states, n_iter=1000).fit(self.X,self.lengths)
+                logL = model.score(self.X,self.lengths)
+            except:
+                logL=float("-inf")
+
+            # According to http://hmmlearn.readthedocs.io/en/latest/api.html#hmmlearn.hmm.GaussianHMM
+            # The parameters of the model are :
+            #   startprob_prior : array, shape (n_components, )
+            #   transmat_prior : array, shape (n_components, n_components)
+            #   means_prior, means_weight : array, shape (n_components, )
+            #   covars_prior, covars_weight : array, shape (n_components, )
+            # So p the number of parameters is :
+            p=num_hidden_states*3+num_hidden_states*num_hidden_states
+
+
+
+            bic=-2*logL+p*np.log(N)
+
+
+            if (best_bic is None):
+                best_bic=bic
+                best_model=model
+            # The lower the BIC is the better BIC!
+            if (bic<best_bic):
+                best_bic=bic
+                best_model = model
+
+        print("Best model found for word {} is with {} hidden states with score {}".format(self.this_word,best_model.n_components,best_bic))
+
+        return best_model
+
         raise NotImplementedError
 
 
@@ -94,6 +135,41 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
+        best_dic=None
+        best_model=None
+
+        # M is the number words in the training set
+        M = len(self.hwords.keys())
+
+        for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
+            anti_logL = 0
+            try:
+                # todo : Would be a good idea to score the model with a part of the data it is
+                # not trained with
+                model = GaussianHMM(n_components=num_hidden_states, n_iter=1000).fit(self.X,self.lengths)
+                logL = model.score(self.X,self.lengths)
+                for word in self.hwords:
+                    if word != self.this_word:
+                        X, lengths = self.hwords[word]
+                        anti_logL=anti_logL+model.score(X, lengths)
+            except:
+                logL=float("-inf")
+
+            # DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
+            #print("logL is {} and antilogL {} and M {}".format(logL,anti_logL,M))
+            dic=logL-1.0/(M-1)*anti_logL
+
+            if (best_dic is None):
+                best_dic=dic
+                best_model=model
+            # The higher the DIC is the better DIC!
+            if (dic>best_dic):
+                best_dic=dic
+                best_model = model
+
+        print("Best model found for word {} is with {} hidden states with score {}".format(self.this_word,best_model.n_components,best_dic))
+
+        return best_model
         raise NotImplementedError
 
 
