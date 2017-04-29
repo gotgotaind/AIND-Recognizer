@@ -1,6 +1,7 @@
 import warnings
 import traceback
 import sys
+import re
 
 from asl_data import SinglesData
 
@@ -24,22 +25,28 @@ def recognize(models: dict, test_set: SinglesData):
     probabilities = []
     guesses = []
     # TODO implement the recognizer
-
+    transmat_fail=0
+    nb_scored=0
     for test_item in range(test_set.num_items):
         #print("test item is : {}".format(test_item))
-        probabilities[test_item]=dict()
+        probabilities.append(dict())
         for model_word in models:
             X,lengths=test_set.get_item_Xlengths(test_item)
             try:
+                nb_scored=nb_scored+1
                 logL = models[model_word].score(X,lengths)
-            except:
-                print
-                "Exception in user code:"
-                print
-                '-' * 60
-                traceback.print_exc(file=sys.stdout)
-                print
-                '-' * 60
+            except Exception as inst:
+                if re.match("^rows of transmat_ must sum to 1.0",str(inst)):
+                    #Ok. That's a known issue...
+                    transmat_fail=transmat_fail+1
+                    pass
+                else:
+                    print("Exception {}\nSetting logL to -inf".format(inst))
+                # print
+                # '-' * 60
+                # traceback.print_exc(file=sys.stdout)
+                # print
+                # '-' * 60
                 logL=float('-inf')
             probabilities[test_item][model_word]=logL
 
@@ -51,9 +58,9 @@ def recognize(models: dict, test_set: SinglesData):
             if probabilities[test_item][word] > max_logL:
                 max_logL=probabilities[test_item][word]
                 guess=word
-        guesses[test_item]=guess
+        guesses.append(guess)
 
-
+    print('Got {} transmat failed for a total of {} score calculations'.format(transmat_fail,nb_scored))
     return probabilities, guesses
 
     raise NotImplementedError

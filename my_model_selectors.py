@@ -1,6 +1,9 @@
 import math
 import statistics
 import warnings
+import re
+import traceback
+import sys
 
 import numpy as np
 from hmmlearn.hmm import GaussianHMM
@@ -84,6 +87,10 @@ class SelectorBIC(ModelSelector):
         # N is the number of data points
         N = len(self.X)
 
+        # f is the number of features
+        f = len(self.X[0])
+        #print("number of features is {}".format(f))
+
         for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
             try:
                 # todo : Would be a good idea to score the model with a part of the data it is
@@ -100,7 +107,12 @@ class SelectorBIC(ModelSelector):
             #   means_prior, means_weight : array, shape (n_components, )
             #   covars_prior, covars_weight : array, shape (n_components, )
             # So p the number of parameters is :
-            p=num_hidden_states*3+num_hidden_states*num_hidden_states
+            # p=num_hidden_states*3+num_hidden_states*num_hidden_states
+
+            #the free transition probability parameters, which is the size of the transmat matrix less one row because they add up to 1 and therefore the final row is deterministic, so m*(m-1)+ the free starting probabilities, which is the size of startprob minus 1 because it adds to 1.0 and last one can be calculated so m-1 + number of means, which is m*f number of covariances which is the size of the covars matrix, which for "diag" is m*f
+
+            m=num_hidden_states
+            p = m*m + 2*m*f - 1
 
 
 
@@ -188,36 +200,65 @@ class SelectorCV(ModelSelector):
         best_logL=None
         best_model=None
 
+        sequences = self.sequences
+        nb_seq = len(sequences)
 
+        # If there is only one sequence for this word. We'll duplicate the sequence
+        # so that Kfold will work by just doing train set equal score set equal to
+        # this single sequence
+        if nb_seq == 1:
+            sequences = sequences + sequences
+            nb_seq = 2
+            print("there is only one sequence for {}".format(self.this_word))
 
+        # If the number of sequences is < 5, get the number of splits equal to the number
+        # of sequences.
+        # If more, split 80%/20%
+        if nb_seq <= 5:
+            nb_folds = nb_seq
+        else:
+            nb_folds = 5
 
+        split_method = KFold(nb_folds)
+
+        # Initialize some counters to evaluate the rate of training/scoring failures
+        n_samples_fail = 0
+        transmat_fail = 0
+        nb_scored = 0
 
         for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
 
             logLtotal=0
 
-            # If the number of sequences is < 5, get the number of splits equal to the number
-            # of sequences.
-            # If more, split 80%/20%
-            nb_seq=len(self.sequences)
-            if nb_seq<=5:
-                nb_folds=nb_seq
-            else:
-                nb_folds=5
-            split_method = KFold(nb_folds)
+            for cv_train_idx, cv_test_idx in split_method.split(sequences):
 
-            #print("Training model for {} with {} hidden states".format(self.this_word, num_hidden_states))
-
-            for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
-                #print("Train fold indices:{} Test fold indices:{}".format(cv_train_idx,                                                                          cv_test_idx))  # view indices of the folds
-                X_train,lengths_train=combine_sequences(cv_train_idx, self.sequences)
-                X_score, lengths_score = combine_sequences(cv_test_idx, self.sequences)
+                X_train,lengths_train=combine_sequences(cv_train_idx, sequences)
+                X_score, lengths_score = combine_sequences(cv_test_idx, sequences)
 
                 try:
+                    nb_scored = nb_scored + 1
                     model = GaussianHMM(n_components=num_hidden_states, n_iter=1000).fit(X_train, lengths_train)
                     logL = model.score(X_score, lengths_score)
+
                     #print("logL = {}".format(logL))
-                except:
+                except Exception as inst:
+                    if re.match("^rows of transmat_ must sum to 1.0", str(inst)):
+                        # Ok. That's a known issue...
+                        transmat_fail = transmat_fail + 1
+                        pass
+                    elif re.match("^n_samples",str(inst)):
+                        # Ok. That's a known issue...
+                        n_samples_fail = n_samples_fail + 1
+                        pass
+
+                    else:
+                        print("Exception {}\nSetting logL to -inf".format(inst))
+                        print("was trying to fit/score with {} hidden states while there were only {} nb_seq".format(num_hidden_states,nb_seq))
+                        print
+                        '-' * 60
+                        traceback.print_exc(file=sys.stdout)
+                        print
+                        '-' * 60
                     logL=float("-inf")
                     #print("Training or scoring failed in model for {} with {} hidden states".format(self.this_word, model.n_components))
 
@@ -233,7 +274,10 @@ class SelectorCV(ModelSelector):
             if (logL>best_logL):
                 best_logL=logL
                 best_model = model
-
+        if transmat_fail>0:
+            print('In selectorCV for {}, Got {} transmat failed for a total of {} fit/score calculations'.format(self.this_word,transmat_fail, nb_scored))
+        if n_samples_fail>0:
+            print('In selectorCV for {}, Got {} n_samples_fail failed for a total of {} fit/score calculations'.format(self.this_word,n_samples_fail, nb_scored))
         print("Best model found for word {} is with {} hidden states with score {}".format(self.this_word,best_model.n_components,best_logL))
 
         return best_model
